@@ -50,7 +50,100 @@ function StatusMsg({ type, msg }) {
   );
 }
 
-// ── Écran 1 : Config clés ───────────────────────────────────────────────────
+// Découpe le texte en parties de max 270 chars (laisse place au numéro)
+function splitIntoThread(text) {
+  if (text.length <= 280) return [text];
+  const parts = [];
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  let current = "";
+  for (const sentence of sentences) {
+    const addition = current ? " " + sentence : sentence;
+    if ((current + addition).length <= 265) {
+      current += addition;
+    } else {
+      if (current) parts.push(current.trim());
+      current = sentence;
+    }
+  }
+  if (current) parts.push(current.trim());
+  // Ajoute numérotation
+  return parts.map((p, i) => `${p} (${i + 1}/${parts.length})`);
+}
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <button onClick={handleCopy} style={{
+      background: copied ? C.green : C.surface,
+      color: copied ? "#000" : C.muted,
+      border: `1px solid ${copied ? C.green : C.border}`,
+      borderRadius: 8, padding: "6px 14px", fontSize: 12,
+      fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+      transition: "all 0.2s", flexShrink: 0,
+    }}>
+      {copied ? "✓ Copié" : "Copier"}
+    </button>
+  );
+}
+
+function ThreadView({ parts }) {
+  if (!parts.length) return null;
+  const isThread = parts.length > 1;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+      {isThread && (
+        <div style={{
+          background: C.accentDim, border: `1px solid ${C.accent}40`,
+          borderRadius: 10, padding: "10px 14px", fontSize: 13, color: C.accent,
+        }}>
+          🧵 Thread de {parts.length} tweets — copie chaque partie dans Twitter
+        </div>
+      )}
+      {parts.map((part, i) => (
+        <div key={i} style={{
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 12, padding: 14,
+        }}>
+          {isThread && (
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 8 }}>
+              PARTIE {i + 1}/{parts.length}
+            </div>
+          )}
+          <div style={{ fontSize: 14, color: C.text, lineHeight: 1.65, marginBottom: 10 }}>
+            {part}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, color: part.length > 280 ? C.danger : C.muted }}>
+              {part.length}/280
+            </span>
+            <CopyButton text={part} />
+          </div>
+        </div>
+      ))}
+      {isThread && (
+        <button
+          onClick={() => {
+            const all = parts.join("\n\n---\n\n");
+            navigator.clipboard.writeText(all);
+          }}
+          style={{
+            background: C.green, color: "#000", border: "none", borderRadius: 12,
+            padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          📋 Copier tout le thread
+        </button>
+      )}
+    </div>
+  );
+}
 
 function EcranConfig({ keys, setKeys, onSave }) {
   const fields = [
@@ -67,9 +160,6 @@ function EcranConfig({ keys, setKeys, onSave }) {
           <a href="https://developer.twitter.com" target="_blank" rel="noreferrer"
             style={{ color: C.accent }}>developer.twitter.com</a>{" "}
           → ton App → <strong style={{ color: C.text }}>Keys and Tokens</strong>.
-        </p>
-        <p style={{ fontSize: 13, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
-          Active le mode <strong style={{ color: C.text }}>Read and Write</strong> dans les permissions.
         </p>
       </div>
       {fields.map((f) => (
@@ -90,44 +180,37 @@ function EcranConfig({ keys, setKeys, onSave }) {
           />
         </div>
       ))}
-      <button
-        onClick={onSave}
-        style={{
-          background: C.accent, color: "#fff", border: "none", borderRadius: 12,
-          padding: "14px", fontWeight: 700, fontSize: 16, cursor: "pointer",
-          marginTop: 4, fontFamily: "inherit",
-        }}
-      >
+      <button onClick={onSave} style={{
+        background: C.accent, color: "#fff", border: "none", borderRadius: 12,
+        padding: "14px", fontWeight: 700, fontSize: 16, cursor: "pointer",
+        marginTop: 4, fontFamily: "inherit",
+      }}>
         Enregistrer les clés
       </button>
     </div>
   );
 }
 
-// ── Écran 2 : Repost ────────────────────────────────────────────────────────
-
-function EcranRepost({ keys, options, addToHistory }) {
+function EcranRepost({ options, addToHistory }) {
   const [original, setOriginal] = useState("");
-  const [modified, setModified] = useState("");
+  const [threadParts, setThreadParts] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [posting, setPosting] = useState(false);
   const [status, setStatus] = useState(null);
-
-  const hasKeys = ["apiKey", "apiSecret", "accessToken", "accessTokenSecret"].every((k) => keys[k]);
 
   async function handleReformulate() {
     if (!original.trim()) return;
-    setLoading(true); setStatus(null);
+    setLoading(true); setStatus(null); setThreadParts([]);
     try {
       const instructions = [
-        "Traduis et reformule légèrement ce tweet en français.",
-        "Garde le même sens mais change la structure pour que ça paraisse original.",
+        "Traduis et reformule ce contenu en français.",
+        "Garde le même sens mais reformule avec tes propres mots.",
         options.tone === "pro" && "Ton professionnel et soigné.",
         options.tone === "casual" && "Ton décontracté et naturel.",
         options.tone === "punchy" && "Ton percutant et direct.",
-        options.addHashtags && "Ajoute 2-3 hashtags pertinents en français.",
-        options.addEmoji && "Ajoute 1-2 emojis bien placés.",
-        "Réponds UNIQUEMENT avec le texte du tweet, sans guillemets ni explication. Max 280 caractères.",
+        options.addHashtags && "Ajoute 2-3 hashtags pertinents en français à la fin.",
+        options.addEmoji && "Ajoute quelques emojis bien placés.",
+        "Réponds UNIQUEMENT avec le texte reformulé, sans guillemets ni explication.",
+        "Si le contenu est long, écris-le entièrement sans le tronquer.",
       ].filter(Boolean).join(" ");
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -135,60 +218,34 @@ function EcranRepost({ keys, options, addToHistory }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: `${instructions}\n\nTweet original:\n"${original}"` }],
+          max_tokens: 2000,
+          messages: [{ role: "user", content: `${instructions}\n\nContenu original:\n"${original}"` }],
         }),
       });
       const data = await res.json();
-      setModified(data.content?.[0]?.text?.trim() || "");
+      const text = data.content?.[0]?.text?.trim() || "";
+      const parts = splitIntoThread(text);
+      setThreadParts(parts);
+      addToHistory({ original: original.slice(0, 60), parts, time: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) });
     } catch { setStatus({ type: "error", msg: "Erreur IA. Vérifie ta connexion." }); }
     setLoading(false);
   }
 
-  async function handlePost() {
-    if (!modified.trim() || !hasKeys) return;
-    setPosting(true); setStatus(null);
-    try {
-      const res = await fetch("/api/tweet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: modified, ...keys }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erreur");
-      addToHistory({ original: original.slice(0, 80), posted: modified, time: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) });
-      setStatus({ type: "success", msg: "Tweet publié !" });
-      setOriginal(""); setModified("");
-    } catch (e) { setStatus({ type: "error", msg: e.message || "Erreur lors du post." }); }
-    setPosting(false);
-  }
-
-  const over = modified.length > 280;
-
   return (
     <div style={{ padding: "20px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
-      {!hasKeys && (
-        <div style={{
-          background: `${C.danger}12`, border: `1px solid ${C.danger}40`,
-          borderRadius: 10, padding: "12px 14px", fontSize: 13, color: C.danger,
-        }}>
-          ⚠️ Configure tes clés Twitter dans l'onglet Réglages d'abord.
-        </div>
-      )}
-
       <div>
         <label style={{ fontSize: 12, fontWeight: 600, color: C.muted, display: "block", marginBottom: 6 }}>
-          TWEET ORIGINAL
+          CONTENU ORIGINAL
         </label>
         <textarea
-          placeholder="Colle le texte du tweet que tu veux reposter…"
+          placeholder="Colle le texte du tweet ou du post que tu veux reposter… (peu importe la longueur)"
           value={original}
           onChange={(e) => setOriginal(e.target.value)}
           style={{
             width: "100%", background: C.surface, border: `1px solid ${C.border}`,
             borderRadius: 10, padding: "13px 14px", color: C.text, fontSize: 15,
             outline: "none", boxSizing: "border-box", resize: "none",
-            minHeight: 110, fontFamily: "inherit", lineHeight: 1.6,
+            minHeight: 130, fontFamily: "inherit", lineHeight: 1.6,
           }}
         />
       </div>
@@ -205,48 +262,11 @@ function EcranRepost({ keys, options, addToHistory }) {
         {loading ? "✨ Génération en cours…" : "✨ Reformuler en français"}
       </button>
 
-      {modified && (
-        <>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: C.muted, display: "block", marginBottom: 6 }}>
-              APERÇU — tu peux encore modifier
-            </label>
-            <textarea
-              value={modified}
-              onChange={(e) => setModified(e.target.value)}
-              style={{
-                width: "100%", background: C.surface,
-                border: `1px solid ${over ? C.danger : C.accent}50`,
-                borderRadius: 10, padding: "13px 14px", color: C.text, fontSize: 15,
-                outline: "none", boxSizing: "border-box", resize: "none",
-                minHeight: 120, fontFamily: "inherit", lineHeight: 1.6,
-              }}
-            />
-            <div style={{ textAlign: "right", fontSize: 12, color: over ? C.danger : C.muted, marginTop: 4 }}>
-              {modified.length} / 280
-            </div>
-          </div>
-
-          <button
-            onClick={handlePost}
-            disabled={posting || over || !hasKeys}
-            style={{
-              background: C.green, color: "#000", border: "none", borderRadius: 12,
-              padding: "15px", fontWeight: 800, fontSize: 16, cursor: "pointer",
-              opacity: posting || over || !hasKeys ? 0.45 : 1, fontFamily: "inherit",
-            }}
-          >
-            {posting ? "Publication…" : "🚀 Publier sur Twitter / X"}
-          </button>
-        </>
-      )}
-
+      <ThreadView parts={threadParts} />
       <StatusMsg type={status?.type} msg={status?.msg} />
     </div>
   );
 }
-
-// ── Écran 3 : Options ───────────────────────────────────────────────────────
 
 function EcranOptions({ options, setOptions }) {
   const tones = [
@@ -275,10 +295,9 @@ function EcranOptions({ options, setOptions }) {
           ))}
         </div>
       </div>
-
       {[
         { key: "addHashtags", label: "Hashtags automatiques", desc: "Ajoute 2-3 hashtags en français" },
-        { key: "addEmoji", label: "Emojis", desc: "Ajoute 1-2 emojis pour dynamiser" },
+        { key: "addEmoji", label: "Emojis", desc: "Ajoute des emojis pour dynamiser" },
       ].map((item) => (
         <div key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
           <div>
@@ -292,15 +311,13 @@ function EcranOptions({ options, setOptions }) {
   );
 }
 
-// ── Écran 4 : Historique ────────────────────────────────────────────────────
-
 function EcranHistorique({ history }) {
   if (!history.length) {
     return (
       <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 14 }}>
-        Aucun repost pour l'instant.<br />
+        Aucun repost pour l'instant.
         <span style={{ fontSize: 12, marginTop: 6, display: "block" }}>
-          Tes publications apparaîtront ici.
+          Tes reformulations apparaîtront ici.
         </span>
       </div>
     );
@@ -317,18 +334,18 @@ function EcranHistorique({ history }) {
               background: C.greenDim, color: C.green,
               border: `1px solid ${C.green}30`, borderRadius: 6,
               padding: "2px 8px", fontSize: 11, fontWeight: 700,
-            }}>✓ Publié</span>
+            }}>
+              {item.parts.length > 1 ? `🧵 ${item.parts.length} tweets` : "✓ 1 tweet"}
+            </span>
             <span style={{ fontSize: 11, color: C.muted }}>{item.time}</span>
           </div>
-          <div style={{ fontSize: 14, color: C.text, lineHeight: 1.6, marginBottom: 6 }}>{item.posted}</div>
-          <div style={{ fontSize: 12, color: C.muted }}>Original : {item.original}{item.original.length >= 80 ? "…" : ""}</div>
+          <div style={{ fontSize: 13, color: C.muted }}>Original : {item.original}…</div>
+          <div style={{ fontSize: 13, color: C.text, marginTop: 4, lineHeight: 1.5 }}>{item.parts[0]?.slice(0, 100)}…</div>
         </div>
       ))}
     </div>
   );
 }
-
-// ── App principale ──────────────────────────────────────────────────────────
 
 const TABS = [
   { id: "repost", label: "Repost", icon: "🔁" },
@@ -344,7 +361,6 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [configSaved, setConfigSaved] = useState(false);
 
-  // Charge les clés sauvegardées
   useEffect(() => {
     try {
       const saved = localStorage.getItem("repostai_keys");
@@ -362,15 +378,12 @@ export default function App() {
     setHistory((h) => [{ ...item, id: Date.now() }, ...h.slice(0, 29)]);
   }
 
-  const hasKeys = ["apiKey", "apiSecret", "accessToken", "accessTokenSecret"].every((k) => keys[k]);
-
   return (
     <div style={{
       minHeight: "100vh", background: C.bg, color: C.text,
       fontFamily: "'Inter', system-ui, sans-serif",
       display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto",
     }}>
-      {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "16px 20px", borderBottom: `1px solid ${C.border}`,
@@ -380,16 +393,11 @@ export default function App() {
           <XIcon />
           RepostAI
         </div>
-        <div style={{
-          width: 10, height: 10, borderRadius: "50%",
-          background: hasKeys ? C.green : C.danger,
-          boxShadow: `0 0 8px ${hasKeys ? C.green : C.danger}`,
-        }} />
+        <div style={{ fontSize: 12, color: C.muted }}>Option B — Copier-coller</div>
       </div>
 
-      {/* Contenu */}
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 80 }}>
-        {tab === "repost" && <EcranRepost keys={keys} options={options} addToHistory={addToHistory} />}
+        {tab === "repost" && <EcranRepost options={options} addToHistory={addToHistory} />}
         {tab === "options" && <EcranOptions options={options} setOptions={setOptions} />}
         {tab === "historique" && <EcranHistorique history={history} />}
         {tab === "config" && (
@@ -400,7 +408,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Bottom nav */}
       <div style={{
         position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
         width: "100%", maxWidth: 480,
@@ -422,10 +429,7 @@ export default function App() {
               fontFamily: "inherit",
             }}>{t.label}</span>
             {tab === t.id && (
-              <div style={{
-                width: 4, height: 4, borderRadius: "50%",
-                background: C.accent, marginTop: 1,
-              }} />
+              <div style={{ width: 4, height: 4, borderRadius: "50%", background: C.accent, marginTop: 1 }} />
             )}
           </button>
         ))}
