@@ -13,21 +13,22 @@ export async function POST(req) {
       "Si le contenu est long, écris-le entièrement sans le tronquer.",
     ].filter(Boolean).join(" ");
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "llama3-8b-8192",
+        messages: [
+          { role: "user", content: `${instructions}\n\nContenu original:\n"${text}"` }
+        ],
         max_tokens: 2000,
-        messages: [{ role: "user", content: `${instructions}\n\nContenu original:\n"${text}"` }],
       }),
     });
     const data = await res.json();
-    const result = data.content?.[0]?.text?.trim() || "";
+    const result = data.choices?.[0]?.message?.content?.trim() || "";
     return Response.json({ result });
   } catch (err) {
     return Response.json({ error: "Erreur serveur" }, { status: 500 });
