@@ -201,29 +201,18 @@ function EcranRepost({ options, addToHistory }) {
     if (!original.trim()) return;
     setLoading(true); setStatus(null); setThreadParts([]);
     try {
-      const instructions = [
-        "Traduis et reformule ce contenu en français.",
-        "Garde le même sens mais reformule avec tes propres mots.",
-        options.tone === "pro" && "Ton professionnel et soigné.",
-        options.tone === "casual" && "Ton décontracté et naturel.",
-        options.tone === "punchy" && "Ton percutant et direct.",
-        options.addHashtags && "Ajoute 2-3 hashtags pertinents en français à la fin.",
-        options.addEmoji && "Ajoute quelques emojis bien placés.",
-        "Réponds UNIQUEMENT avec le texte reformulé, sans guillemets ni explication.",
-        "Si le contenu est long, écris-le entièrement sans le tronquer.",
-      ].filter(Boolean).join(" ");
-
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/reformulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          messages: [{ role: "user", content: `${instructions}\n\nContenu original:\n"${original}"` }],
+          text: original,
+          tone: options.tone,
+          addHashtags: options.addHashtags,
+          addEmoji: options.addEmoji,
         }),
       });
       const data = await res.json();
-      const text = data.content?.[0]?.text?.trim() || "";
+      const text = data.result || "";
       const parts = splitIntoThread(text);
       setThreadParts(parts);
       addToHistory({ original: original.slice(0, 60), parts, time: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) });
